@@ -1,0 +1,110 @@
+---
+title: "Practical Machine Learning Assignment"
+author: "David Kwa"
+date: "29 January 2016"
+output: html_document
+---
+
+## Background  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. More information is available from the website [here:](< http://groupware.les.inf.puc-rio.br/har>) (see the section on the Weight Lifting Exercise Dataset).  
+  
+6 participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The goal of this project is to use the data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise. This is the "classe" variable in the training set.  
+  
+## Data  
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv  
+
+
+---
+  
+## Data Cleaning and Preparation
+
+We start off by loading the required libraries, enabling multi-core parallel processing and then reading in the raw data.  
+
+```{r load data, echo=TRUE}
+library(mlbench)
+library(caret)
+library(parallel)
+library(doParallel)
+
+# find number of cores in system and enable milti-core parallel processing
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+# read in the csv data assumming it is already downloaded into the working directory
+pmltrain <- read.csv("pml-training.csv")
+pmltest <- read.csv("pml-testing.csv")
+```
+
+First we clean up the data by removing variables with nearly zero variance, variables that are almost always NA, and lastly variables that don't make intuitive sense for prediction.   
+
+```{r clean training data, echo=TRUE}
+# remove variables with nearly zero variance
+nzv <- nearZeroVar(pmltrain)
+pmltrainclean <- pmltrain[, -nzv]
+
+# remove variables that are almost always NA (>95% NA to be specific)
+mostlyNA <- sapply(pmltrainclean, function(x) mean(is.na(x))) > 0.95
+pmltrainclean <- pmltrainclean[, mostlyNA==F]
+
+# remove variables that don't make intuitive sense for prediction (X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp), which happen to be the first five variables
+pmltrainclean <- pmltrainclean[, -(1:5)]
+```
+
+Now, with a clean training dataset, we can proceed to train a model. And since we need to test the model before we use it, lets partition it 70:30 into a training and a test set respectively.  
+
+```{r partition training data, echo=FALSE}
+set.seed(100889)
+inTrain <- createDataPartition(pmltrainclean$classe, p=0.7, list=F)
+train_train <- pmltrainclean[inTrain, ]
+train_test <- pmltrainclean[-inTrain, ]
+```
+
+---
+  
+## Model Building  
+
+Lets start with a Random Forest model, as it is one of the most commonly used and accurate model, to see if it would have acceptable performance. We fit the model on train_train dataset using a 10-fold cross-validation sampling and let the train function select the optimal tuning parameters for the model.  
+
+```{r train model, echo=TRUE}
+# setup train control to use 10-fold CV sampling
+fitControl <- trainControl(method="cv", number=10, verboseIter=F)
+
+# fit model on train_train
+fit_rf <- train(classe ~ ., data=train_train, method="rf", trControl=fitControl)
+
+# print final model to see tuning parameters it chose
+fit_rf$finalModel
+
+# shut down the cluster
+stopCluster(cluster)
+```
+
+We see that it used 500 trees with 27 variables.  
+  
+---
+  
+## Model Evaluation   
+  
+Now, We use the fitted Random Forest model to predict the label ("classe") in the train_test dataset, and show the confusion matrix to compare the predicted versus the actual.    
+  
+```{r evaluate model, echo=TRUE}
+# use model to predict classe in train_test
+pred_rf <- predict(fit_rf, newdata=train_test)
+
+# show confusion matrix to get estimate of out-of-sample error
+confusionMatrix(train_test$classe, pred_rf)
+```
+  
+The accuracy is 99.76%, thus the predicted accuracy for the out-of-sample error is 0.24%.
+
+This is an excellent result, so We will use this Random Forests model to perform the prediction on the test set (pmltest) to answer the final Quiz.  
+  
+---  
+  
+### End of report.
